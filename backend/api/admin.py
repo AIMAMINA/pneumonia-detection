@@ -1,13 +1,10 @@
 from django.conf import settings
 from django.contrib import admin
-from .models import AvailableDate, AvailableTime, Appointment, UserScan
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
-from django.urls import reverse
 from django.utils.html import format_html
-from django.contrib.auth.models import User
-from .models import ContactMessage
-from django.contrib import admin
+
+from .models import Appointment, AvailableDate, AvailableTime, ContactMessage, Profile, UserScan
 
 # Register your models here.
 
@@ -54,7 +51,7 @@ class AppointmentAdmin(admin.ModelAdmin):
         
         context = {
             'appointment': appointment,
-            'clinic_name': 'Your Clinic Name',  # Customize this
+            'clinic_name': 'ElHakim AI',
             'contact_phone': '(123) 456-7890'   # Add your contact number
         }
 
@@ -107,8 +104,8 @@ class AppointmentAdmin(admin.ModelAdmin):
 # scans 
 
 class UserScanAdmin(admin.ModelAdmin):
-    list_display = ('user', 'scan_name', 'upload_date', 'view_scan_link')
-    list_filter = ('upload_date', 'user')
+    list_display = ('user', 'scan_name', 'upload_date', 'ai_result', 'view_scan_link')
+    list_filter = ('upload_date', 'ai_result', 'user')
     search_fields = ('user__username', 'scan_name', 'description')
     
     fieldsets = (
@@ -133,7 +130,7 @@ class UserScanAdmin(admin.ModelAdmin):
         context = {
             'user': scan.user,
             'scan': scan,
-            'site_name': 'Your Clinic Name',  # Customize this
+            'site_name': 'ElHakim AI',
             'login_url': f"{frontend_url}/login"  # Add your login URL
         }
 
@@ -167,9 +164,9 @@ admin.site.register(Appointment, AppointmentAdmin)
 admin.site.register(AvailableDate)
 admin.site.register(AvailableTime)
 admin.site.register(UserScan, UserScanAdmin)
-admin.site.unregister(User)
-from django.contrib.auth.models import User
-from django.contrib.auth.admin import UserAdmin
-from django.contrib import admin
 
-admin.site.register(User, UserAdmin)
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'uses_left', 'purchases')
+    search_fields = ('user__username', 'user__email')

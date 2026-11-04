@@ -1,41 +1,54 @@
-from django.shortcuts import render, redirect
-from django.contrib.auth.models import User
-from rest_framework import generics
+import datetime
+import logging
+import os
 
-from rest_framework.decorators import api_view
+from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.db import IntegrityError
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.template.loader import get_template
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from rest_framework import generics, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.reverse import reverse
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
-import json
-from .serializers import UserSerializer, AppointmentSerializer, AvailableDateSerializer, AvailableTimeSerializer, UserScanSerializer, ProfileSerializer
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import AvailableDate, AvailableTime, Appointment, ContactMessage, UserScan, Profile
-from rest_framework import status
-from django.core.mail import send_mail
-from django.conf import settings
-from django.utils import timezone
-from django.contrib import messages
-from .forms import AppointmentForm
-from rest_framework.decorators import permission_classes
-from django.core.exceptions import ValidationError
-from django.utils.dateparse import parse_date
-import tensorflow as tf
-import numpy as np
-from tensorflow import keras
-from PIL import Image
-import os
+from . import ml
+from .models import Appointment, AvailableDate, Profile, UserScan
+from .serializers import (
+    AppointmentSerializer,
+    AvailableDateSerializer,
+    AvailableTimeSerializer,
+    ContactMessageSerializer,
+    ProfileSerializer,
+    UserScanSerializer,
+    UserSerializer,
+)
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from django.template.loader import get_template
-from django.http import HttpResponse
-from xhtml2pdf import pisa
-from django.templatetags.static import static
-import datetime
-# Create your views here.
+logger = logging.getLogger(__name__)
+User = get_user_model()
+
+USES_PER_PURCHASE = 3
+
+
+def notify(subject, message, recipients):
+    """Send an email without ever breaking the request if SMTP is misconfigured."""
+    recipients = [r for r in recipients if r]
+    if not recipients:
+        return
+    try:
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipients)
+    except Exception:  # noqa: BLE001 - email is best effort
+        logger.exception("Could not send email '%s'", subject)
+
+
+# ---------------- Auth ----------------
 
 class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -44,344 +57,275 @@ class CreateUserView(generics.CreateAPIView):
 
 
 class EmailTokenObtainPairView(TokenObtainPairView):
+    """Login with either a username or an email address."""
+
     def post(self, request, *args, **kwargs):
-        # If email is provided, find username
-        if 'email' in request.data:
-            try:
-                user = User.objects.get(email=request.data['email'])
-                request.data._mutable = True
-                request.data['username'] = user.username
-                request.data._mutable = False
-            except User.DoesNotExist:
-                pass
-        return super().post(request, *args, **kwargs)
+        data = request.data.copy()
+        identifier = data.get("email") or data.get("username", "")
+        if "@" in identifier:
+            user = User.objects.filter(email__iexact=identifier).first()
+            if user:
+                data["username"] = user.username
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([AllowAny])
 def api_root(request, format=None):
     return Response({
-        'api': 'Authentication API',
-        'endpoints': {
-            'register': reverse('register', request=request, format=format),
-            'login': reverse('get_token', request=request, format=format),
-            'token_refresh': reverse('refresh', request=request, format=format),
-            'profile': reverse('get_profile', request=request, format=format),
-            'payment': '/api/fake-payment/',
-            'use_check': '/api/use-check/',
-            'predict_scan': '/api/predict-scan/',
+        "api": "ElHakim AI API",
+        "endpoints": {
+            "register": reverse("register", request=request, format=format),
+            "login": reverse("access", request=request, format=format),
+            "token_refresh": reverse("refresh", request=request, format=format),
+            "profile": reverse("profile", request=request, format=format),
+            "predict_scan": reverse("predict-scan", request=request, format=format),
+            "user_scans": reverse("user_scans", request=request, format=format),
+            "available_dates": reverse("available_dates", request=request, format=format),
+            "appointments": reverse("book_appointment", request=request, format=format),
+            "contact": reverse("submit_contact", request=request, format=format),
         },
     })
-    
-#contact us view 
-@csrf_exempt
+
+
+# ---------------- Contact ----------------
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def submit_contact(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-            if not all(field in data for field in ['first_name', 'last_name', 'email', 'phone', 'subject', 'message']):
-                return JsonResponse({"error": "Missing fields"}, status=400)
-
-            ContactMessage.objects.create(
-                first_name=data["first_name"],
-                last_name=data["last_name"],
-                email=data["email"],
-                phone=data["phone"],
-                subject=data["subject"],
-                message=data["message"]
-            )
-            return JsonResponse({"message": "Message received successfully!"})
-        except Exception as e:
-            print("Error:", str(e))
-            return JsonResponse({"error": "Invalid data"}, status=400)
-
-    return JsonResponse({"error": "Invalid request method"}, status=405)
+    serializer = ContactMessageSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    message = serializer.save()
+    notify(
+        f"New contact message: {message.get_subject_display()}",
+        f"From: {message.first_name} {message.last_name} <{message.email}>\n"
+        f"Phone: {message.phone}\n\n{message.message}",
+        [settings.ADMIN_EMAIL],
+    )
+    return Response({"message": "Message received successfully!"}, status=status.HTTP_201_CREATED)
 
 
-#book appointment view 
+# ---------------- Appointments ----------------
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([AllowAny])
 def available_dates(request):
-    dates = AvailableDate.objects.filter(date__gte=timezone.now().date())
-    serializer = AvailableDateSerializer(dates, many=True)
-    return Response(serializer.data)
+    dates = AvailableDate.objects.filter(date__gte=timezone.localdate()).order_by("date")
+    return Response(AvailableDateSerializer(dates, many=True).data)
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 @permission_classes([AllowAny])
 def available_times(request):
-    date_str = request.query_params.get('date')
-    if not date_str:
-        return Response({'error': 'Date parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        # Parse the date string
-        date_obj = parse_date(date_str)
-        if date_obj is None:
-            raise ValidationError("Invalid date format. Use YYYY-MM-DD.")
-            
-        # Get booked appointments for this date
-        booked_times = Appointment.objects.filter(date__date=date_obj).values_list('time_id', flat=True)
-        
-        # Get all available times not in booked times
-        times = AvailableTime.objects.exclude(id__in=booked_times)
-        serializer = AvailableTimeSerializer(times, many=True)
-        return Response(serializer.data)
-        
-    except ValidationError as e:
-        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    date_obj = parse_date(request.query_params.get("date", "") or "")
+    if date_obj is None:
+        return Response(
+            {"error": "A valid 'date' parameter (YYYY-MM-DD) is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-@api_view(['POST'])
+    available_date = AvailableDate.objects.filter(date=date_obj).first()
+    if available_date is None:
+        return Response([])
+
+    booked = Appointment.objects.filter(date=available_date).exclude(
+        status="cancelled"
+    ).values_list("time_id", flat=True)
+    times = available_date.available_times.exclude(id__in=booked).order_by("time")
+    return Response(AvailableTimeSerializer(times, many=True).data)
+
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 def book_appointment(request):
     serializer = AppointmentSerializer(data=request.data)
-    if serializer.is_valid():
+    serializer.is_valid(raise_exception=True)
+    try:
         appointment = serializer.save()
-        
-        # Send email notification
-        send_mail(
-            f'New Appointment Booking: {appointment.full_name}',
-            f'''
-            New appointment booked:
-            
-            Name: {appointment.full_name}
-            Phone: {appointment.phone_number}
-            Email: {appointment.email or "Not provided"}
-            Date: {appointment.date}
-            Time: {appointment.time}
-            Notes: {appointment.notes or "None"}
-            ''',
-            settings.DEFAULT_FROM_EMAIL,
-            [settings.ADMIN_EMAIL],
-            fail_silently=False,
+    except IntegrityError:
+        return Response(
+            {"error": "This time slot has just been booked. Please choose another one."},
+            status=status.HTTP_409_CONFLICT,
         )
-        
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    notify(
+        f"New appointment booking: {appointment.full_name}",
+        f"Name: {appointment.full_name}\n"
+        f"Phone: {appointment.phone_number}\n"
+        f"Email: {appointment.email or 'Not provided'}\n"
+        f"Date: {appointment.date} at {appointment.time}\n"
+        f"Notes: {appointment.notes or 'None'}",
+        [settings.ADMIN_EMAIL],
+    )
+    return Response(AppointmentSerializer(appointment).data, status=status.HTTP_201_CREATED)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def user_scans(request):
-    scans = UserScan.objects.filter(user=request.user).order_by('-upload_date')
-    serializer = UserScanSerializer(scans, many=True)
-    return Response(serializer.data)
+# ---------------- Profile & payments ----------------
 
-
-# ---------------- Profile & Payments ----------------
-
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_profile(request):
-    """
-    Return the current user's Profile (including uses_left).
-    """
     profile, _ = Profile.objects.get_or_create(user=request.user)
-    serializer = ProfileSerializer(profile)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    return Response(ProfileSerializer(profile).data)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def fake_payment(request):
+    """Demo payment: adds credits without charging anything."""
     profile, _ = Profile.objects.get_or_create(user=request.user)
-    
-    # Add 3 uses per purchase (adjust as needed)
-    profile.uses_left += 3
+    profile.uses_left += USES_PER_PURCHASE
     profile.purchases += 1
     profile.save()
-    
     return Response({
-        'uses_added': 3,
-        'total_uses': profile.uses_left,
-        'message': 'Purchase successful'
+        "uses_added": USES_PER_PURCHASE,
+        "total_uses": profile.uses_left,
+        "message": "Purchase successful",
     })
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def use_check(request):
     profile, _ = Profile.objects.get_or_create(user=request.user)
     return Response({
-        'allowed': profile.uses_left > 0,
-        'uses_left': profile.uses_left,
-        'message': 'Purchase more uses if needed' if profile.uses_left == 0 else ''
+        "allowed": profile.uses_left > 0,
+        "uses_left": profile.uses_left,
     })
 
-# ---------------- AI Prediction ----------------
 
-# Load model just once when the module is imported
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(BASE_DIR, 'model', 'cnn_pneumonia_model_binary3.h5')
+# ---------------- Scans & AI ----------------
 
-# Add error handling for model loading
-try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_scans(request):
+    scans = UserScan.objects.filter(user=request.user).order_by("-upload_date")
+    return Response(UserScanSerializer(scans, many=True, context={"request": request}).data)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def predict_scan(request):
-    """
-    Process an X-ray scan and predict if pneumonia is present.
-    """
-    # Check if model loaded successfully
-    if model is None:
-        return Response(
-            {'error': 'Model not loaded. Please contact support.'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-    # Ensure the user is authenticated
+    """Analyse an uploaded X-ray (costs one credit) and save it to the user's scans."""
     profile, _ = Profile.objects.get_or_create(user=request.user)
-
-    # Check uses_left
     if profile.uses_left < 1:
         return Response(
-            {'error': 'No uses left. Please purchase more credits.'},
-            status=status.HTTP_402_PAYMENT_REQUIRED  # More appropriate status
+            {"error": "No scans left. Please purchase more credits."},
+            status=status.HTTP_402_PAYMENT_REQUIRED,
         )
 
-    # Make sure a file was uploaded
-    scan_file = request.FILES.get('scan')
+    scan_file = request.FILES.get("scan")
     if not scan_file:
-        return Response(
-            {'error': 'No scan file provided'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({"error": "No scan file provided."}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Process image for your model
-        img = Image.open(scan_file).convert('L')            # grayscale
-        img = img.resize((150, 150))                        # match training size
-        arr = np.array(img) / 255.0                         # normalize
-        arr = arr.reshape((1, 150, 150, 1))                 # add batch & channel dims
-
-        # Run prediction
-        pred = model.predict(arr)
-        pred_class = int(pred[0][0] > 0.5)
-
-        # Deduct one use - only after successful prediction
-        profile.uses_left -= 1
-        profile.save()
-
-        # Return both the result and remaining uses
-        return Response({
-            'prediction': pred_class,
-            'text': 'Pneumonia detected' if pred_class else 'Normal scan',
-            'uses_left': profile.uses_left
-        }, status=status.HTTP_200_OK)
-    
-    except Exception as e:
+        result = ml.predict(scan_file)
+    except ml.ModelUnavailable:
         return Response(
-            {'error': f'Error processing image: {str(e)}'},
-            status=status.HTTP_400_BAD_REQUEST)
+            {"error": "The AI model is not available right now."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except ml.InvalidImage:
+        return Response(
+            {"error": "Invalid file. Please upload a valid X-ray image."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+    scan_file.seek(0)
+    scan = UserScan.objects.create(
+        user=request.user,
+        scan_name=os.path.splitext(scan_file.name)[0][:100] or "Chest X-ray",
+        description="Uploaded for AI analysis",
+        scan_file=scan_file,
+        is_ai_analyzed=True,
+        ai_result=result["label"],
+        ai_confidence=result["confidence"],
+    )
 
-@api_view(['GET'])
+    profile.uses_left -= 1
+    profile.save()
+
+    return Response({
+        **result,
+        "scan": UserScanSerializer(scan, context={"request": request}).data,
+        "uses_left": profile.uses_left,
+    })
+
+
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def generate_pdf_view(request):
-    result = request.GET.get('result', 'Normal')
+def analyze_user_scan(request, pk):
+    """Analyse a scan already stored for the user (e.g. uploaded by a doctor). Free."""
+    scan = get_object_or_404(UserScan, pk=pk, user=request.user)
+    try:
+        with scan.scan_file.open("rb") as f:
+            result = ml.predict(f)
+    except ml.ModelUnavailable:
+        return Response(
+            {"error": "The AI model is not available right now."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except (ml.InvalidImage, FileNotFoundError):
+        return Response({"error": "This scan file cannot be read."}, status=status.HTTP_400_BAD_REQUEST)
 
-    template = get_template("pdf_template.html")
-    context = {
+    scan.is_ai_analyzed = True
+    scan.ai_result = result["label"]
+    scan.ai_confidence = result["confidence"]
+    scan.save(update_fields=["is_ai_analyzed", "ai_result", "ai_confidence"])
+    return Response({**result, "scan": UserScanSerializer(scan, context={"request": request}).data})
+
+
+def _link_callback(uri, rel):
+    """Let xhtml2pdf read static files from disk instead of over HTTP."""
+    if uri.startswith(settings.STATIC_URL):
+        path = os.path.join(settings.STATICFILES_DIRS[0], uri[len(settings.STATIC_URL):])
+        if os.path.isfile(path):
+            return path
+    return uri
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def generate_pdf_view(request, pk):
+    from xhtml2pdf import pisa  # heavy import, only needed here
+
+    scan = get_object_or_404(UserScan, pk=pk, user=request.user)
+    if not scan.ai_result:
+        return Response({"error": "This scan has not been analysed yet."}, status=status.HTTP_400_BAD_REQUEST)
+
+    html = get_template("pdf_template.html").render({
         "user": request.user,
-        "result": result,
+        "scan": scan,
+        "result": scan.ai_result,
+        "confidence": round((scan.ai_confidence or 0) * 100, 1),
         "date": datetime.datetime.now().strftime("%B %d, %Y %H:%M"),
-        "logo_url": request.build_absolute_uri(static('img/logo.png'))
-    }
+        "logo_url": f"{settings.STATIC_URL}img/logo.png",
+    })
 
-    html = template.render(context)
-
-    response = HttpResponse(content_type='application/pdf')
-    response['Content-Disposition'] = 'inline; filename="ai_report.pdf"'
-
-    pisa.CreatePDF(html, dest=response)
+    response = HttpResponse(content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="elhakim_report_{scan.pk}.pdf"'
+    pdf = pisa.CreatePDF(html, dest=response, link_callback=_link_callback)
+    if pdf.err:
+        return Response({"error": "Could not generate the report."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return response
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def predict_scan_free(request):
-    """
-    Prédiction AI sans déduction de crédits (pour la page Results).
-    """
-    if model is None:
-        return Response(
-            {'error': 'Model not loaded. Please contact support.'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
 
-    scan_file = request.FILES.get('scan')
-    if not scan_file:
-        return Response(
-            {'error': 'No scan file provided'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+# ---------------- Admin ----------------
 
-    try:
-        img = Image.open(scan_file).convert('L')
-        img = img.resize((150, 150))
-        arr = np.array(img) / 255.0
-        arr = arr.reshape((1, 150, 150, 1))
-
-        pred = model.predict(arr)
-        pred_class = int(pred[0][0] > 0.5)
-
-        return Response({
-            'prediction': pred_class,
-            'text': 'Pneumonia detected' if pred_class else 'Normal scan'
-        }, status=status.HTTP_200_OK)
-
-    except Exception as e:
-        return Response(
-            {'error': f'Error processing image: {str(e)}'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-from django.http import JsonResponse
-from django.contrib.auth import get_user_model
-from .models import Appointment, UserScan
-
+@staff_member_required
 def dashboard_stats(request):
-    User = get_user_model()
-
     return JsonResponse({
         "appointments": {
             "total": Appointment.objects.count(),
             "confirmed": Appointment.objects.filter(status="confirmed").count(),
             "pending": Appointment.objects.filter(status="pending").count(),
-                "cancelled": Appointment.objects.filter(status="cancelled").count(),
-
+            "cancelled": Appointment.objects.filter(status="cancelled").count(),
         },
         "scans": {
             "total": UserScan.objects.count(),
-            "ai": UserScan.objects.filter(description__icontains="ai").count(),
-            "manual": UserScan.objects.filter(description__icontains="manual").count(),
+            "ai_analyzed": UserScan.objects.filter(is_ai_analyzed=True).count(),
         },
-        "users": {
-            "total": User.objects.count(),
-            "with_profiles": User.objects.filter(profile__isnull=False).count()
-        }
+        "users": {"total": User.objects.count()},
     })
-
-from django.contrib.admin.views.decorators import staff_member_required
-from django.shortcuts import render
-from .models import Appointment
-
-@staff_member_required
-def admin_dashboard(request):
-    # Compter les statuts
-    confirmed = Appointment.objects.filter(status='confirmed').count()
-    cancelled = Appointment.objects.filter(status='cancelled').count()
-    pending = Appointment.objects.filter(status='pending').count()
-
-    return render(request, 'admin/dashboard.html', {
-        'confirmed': confirmed,
-        'cancelled': cancelled,
-        'pending': pending,
-    })
-

@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --color-film: #0e1c2b;
+  --color-film-2: #16293d;
+  --color-paper: #f4f7f9;
+  --color-ink: #13243a;
+  --color-muted: #5b6b7f;
+  --color-line: #d8e1e9;
+  --color-brand: #3e5c86;
+  --color-brand-dark: #2c4566;
+  --color-mint: #23a08f;
+  --color-amber: #d98a1e;
+  --color-danger: #c2412d;
+
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display text-ink;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-mint);
+    outline-offset: 2px;
+  }
+}
+
+/* The one orchestrated moment: a scan line sweeping the X-ray once on load */
+@keyframes scan {
+  0% {
+    top: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.scan-line {
+  animation: scan 2.4s cubic-bezier(0.45, 0, 0.3, 1) 0.4s both;
+}
+.scan-reveal {
+  animation: reveal 0.5s ease-out 2.7s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-line {
+    display: none;
+  }
+  .scan-reveal {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}

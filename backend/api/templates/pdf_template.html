@@ -48,6 +48,14 @@
       text-align: justify;
     }
 
+    .disclaimer {
+      margin-top: 18px;
+      padding: 8px;
+      font-size: 11px;
+      color: #7a4b00;
+      background: #fff6e0;
+    }
+
     .footer {
       margin-top: 20px;
       text-align: right;
@@ -72,25 +80,28 @@
 
   <p>Dear {{ user.username }},</p>
 
-  <p><strong>Diagnosis:</strong> {{ result }}</p>
+  <p><strong>Scan:</strong> {{ scan.scan_name }} ({{ scan.upload_date|date:"d/m/Y" }})</p>
+  <p><strong>AI result:</strong> {{ result }} &mdash; confidence {{ confidence }}%</p>
 
   {% if result == 'Normal' %}
     <p class="paragraph">
-      Based on the analysis of your chest X-ray, the results indicate no visible signs of pneumonia or other acute pulmonary abnormalities. The lung fields are clear, the heart silhouette appears within normal limits, and there is no evidence of fluid accumulation or structural anomalies.
+      The AI model did not detect patterns associated with pneumonia on this chest X-ray.
     </p>
     <p class="paragraph">
-      At this time, no further medical action is required. However, if you experience any unusual symptoms such as persistent cough, chest pain, or difficulty breathing, we recommend following up with a healthcare professional.
+      If you experience symptoms such as a persistent cough, fever, chest pain or difficulty breathing, please consult a healthcare professional.
     </p>
   {% else %}
     <p class="paragraph">
-      The AI model has detected radiological patterns suggestive of pneumonia. These may include areas of increased opacity (consolidation), which can indicate inflammation or infection of lung tissue. These findings are consistent with bacterial or viral pneumonia.
+      The AI model detected patterns that are often associated with pneumonia, such as areas of increased opacity in the lungs.
     </p>
     <p class="paragraph">
-      We strongly advise you to consult a physician or pulmonologist for a full clinical evaluation and confirmatory diagnosis. Early medical intervention can significantly improve recovery and reduce the risk of complications.
+      We strongly advise you to consult a physician or pulmonologist for a clinical evaluation and a confirmed diagnosis.
     </p>
   {% endif %}
 
   <p class="paragraph">Thank you for trusting ElHakim AI for your diagnostic needs. We remain committed to supporting your health with precision and care.</p>
+
+  <p class="disclaimer">This report was generated automatically by an AI model as part of a student project. It is not a medical diagnosis and must not replace the opinion of a qualified physician.</p>
 
   <div class="footer">ElHakim AI</div>
 

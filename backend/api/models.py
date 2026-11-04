@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
@@ -56,7 +56,8 @@ Original message:
             fail_silently=False,
         )
 
-#appointment form model to store doctor availability 
+
+# appointment form model to store doctor availability 
 User = get_user_model()
 
 class AvailableDate(models.Model):
@@ -93,7 +94,14 @@ class Appointment(models.Model):
         return f"{self.full_name} - {self.date} {self.time}"
     
     class Meta:
-        unique_together = ('date', 'time')
+        constraints = [
+            # A slot can be booked again once the previous appointment is cancelled
+            models.UniqueConstraint(
+                fields=['date', 'time'],
+                condition=~Q(status='cancelled'),
+                name='unique_active_appointment_slot',
+            ),
+        ]
 
 
 class UserScan(models.Model):
@@ -103,6 +111,8 @@ class UserScan(models.Model):
     scan_file = models.FileField(upload_to='user_scans/')
     upload_date = models.DateTimeField(auto_now_add=True)
     is_ai_analyzed = models.BooleanField(default=False)
+    ai_result = models.CharField(max_length=20, blank=True)
+    ai_confidence = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.user.username}'s {self.scan_name}"
