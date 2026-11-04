@@ -1,0 +1,11 @@
+Dear {{ appointment.full_name }},
+
+Your appointment has been confirmed .
+
+Date: {{ appointment.date }}
+Time: {{ appointment.time }}
+
+Please arrive 15 minutes before your scheduled time.
+
+Thank you,
+Clinic Team

@@ -1,0 +1,8 @@
+{% block extrahead %}
+    {{ block.super }}
+    {% load static %}
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{% static 'js/custom_admin.js' %}"></script>
+
+{% endblock %}

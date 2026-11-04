@@ -1,0 +1,6 @@
+Dear {{ appointment.full_name }},
+
+Your appointment has been cancelled .
+
+Date: {{ appointment.date }}
+Time: {{ appointment.time }}

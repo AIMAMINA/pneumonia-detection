@@ -1,0 +1,115 @@
+.aicheck-section {
+  background-color: #edf3f9; 
+  width: 100%;
+}
+
+.aicheck-container {
+  max-width: 1300px;
+  margin: auto;
+  padding: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 60px;
+  flex-wrap: wrap;
+}
+
+.aicheck-text {
+  flex: 1;
+  min-width: 300px;
+}
+
+.aicheck-text h2 {
+  font-size: 42px;
+  color: #2e3b52;
+  line-height: 1.4;
+}
+
+.aicheck-text h2 span {
+  color: #4a628a;
+}
+
+.aicheck-text p {
+  margin: 20px;
+  font-size: 16px;
+  color: #678;
+}
+
+.aicheck-btn {
+  margin-top: 30px;
+  background-color: #4a628a;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.aicheck-btn:hover {
+  background-color: #7ab2d3;
+}
+
+.aicheck-image {
+  position: relative;
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: fit-content;
+}
+
+
+.aicheck-image img {
+  width: auto;
+  max-width: none;
+  height: 100%;
+  object-fit: contain;
+}
+@media (max-width: 900px) {
+  .aicheck-container {
+    position: relative;
+    height: 100vh;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 0 20px;
+  }
+
+  .aicheck-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    justify-content: center;
+    align-items: center;
+    opacity: 0.2;
+    z-index: 1;
+  }
+
+  .aicheck-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .aicheck-text {
+    z-index: 2;
+    position: relative;
+    color: #2e3b52;
+    margin-top: 20%;
+  }
+
+  .aicheck-text h2,
+  .aicheck-text p {
+    color: #2e3b52;
+  }
+
+  .aicheck-btn {
+    background-color: #4a628a;
+  }
+}

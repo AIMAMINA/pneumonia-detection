@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>New Scan Available</title>
+</head>
+<body>
+    <p>Hello {{ user.username }},</p>
+    
+    <p>Your new scan <strong>{{ scan.scan_name }}</strong> is now available.</p>
+    
+    <p>Description: {{ scan.description }}</p>
+    
+    <p>You can view it by <a href="{{ login_url }}">logging into your account</a>.</p>
+    
+    <p>Direct link to scan (requires login): <a href="{{ scan_url }}">{{ scan_url }}</a></p>
+    
+    <p>Thank you,<br>
+    {{ site_name }} Team</p>
+</body>
+</html>

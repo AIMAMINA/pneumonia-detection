@@ -1,0 +1,11 @@
+Hello {{ user.username }},
+
+Your new scan "{{ scan.scan_name }}" is now available on our website.
+
+Description: {{ scan.description }}
+
+You can view it by logging into your account at:
+{{ login_url }}
+
+Thank you,
+{{ site_name }} Team

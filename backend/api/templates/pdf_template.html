@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Helvetica', sans-serif;
+      font-size: 14px;
+      padding: 30px;
+      color: #222;
+    }
+
+    .header-table {
+      width: 100%;
+      margin-bottom: 20px;
+    }
+
+    .header-table td {
+      vertical-align: middle;
+    }
+
+    .logo {
+      height: 160px;
+    }
+
+    .clinic-name {
+      font-size: 20px;
+      font-weight: bold;
+      color: #2e3b52;
+      padding-top: 35px;
+      padding-bottom: -40px;
+    }
+
+    .date {
+      font-size: 12px;
+      color: #555;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #4a628a;
+      margin: 10px 0 5px 0;
+    }
+
+    .paragraph, p {
+      margin: 4px 0;
+      text-align: justify;
+    }
+
+    .footer {
+      margin-top: 20px;
+      text-align: right;
+      font-weight: bold;
+      color: #2e3b52;
+    }
+  </style>
+</head>
+<body>
+
+  <table class="header-table">
+    <tr>
+      <td><img src="{{ logo_url }}" class="logo" alt="Clinic Logo"></td>
+      <td style="text-align: right;">
+        <div class="clinic-name">ElHakim AI</div>
+        <div class="date">{{ date }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <p class="section-title">Subject: Chest X-ray Diagnostic Report</p>
+
+  <p>Dear {{ user.username }},</p>
+
+  <p><strong>Diagnosis:</strong> {{ result }}</p>
+
+  {% if result == 'Normal' %}
+    <p class="paragraph">
+      Based on the analysis of your chest X-ray, the results indicate no visible signs of pneumonia or other acute pulmonary abnormalities. The lung fields are clear, the heart silhouette appears within normal limits, and there is no evidence of fluid accumulation or structural anomalies.
+    </p>
+    <p class="paragraph">
+      At this time, no further medical action is required. However, if you experience any unusual symptoms such as persistent cough, chest pain, or difficulty breathing, we recommend following up with a healthcare professional.
+    </p>
+  {% else %}
+    <p class="paragraph">
+      The AI model has detected radiological patterns suggestive of pneumonia. These may include areas of increased opacity (consolidation), which can indicate inflammation or infection of lung tissue. These findings are consistent with bacterial or viral pneumonia.
+    </p>
+    <p class="paragraph">
+      We strongly advise you to consult a physician or pulmonologist for a full clinical evaluation and confirmatory diagnosis. Early medical intervention can significantly improve recovery and reduce the risk of complications.
+    </p>
+  {% endif %}
+
+  <p class="paragraph">Thank you for trusting ElHakim AI for your diagnostic needs. We remain committed to supporting your health with precision and care.</p>
+
+  <div class="footer">ElHakim AI</div>
+
+</body>
+</html>
+
